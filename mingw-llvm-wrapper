@@ -1,0 +1,95 @@
+#!/bin/sh -
+#
+# mingw-llvm-wrapper - LLVM based cross toolchain driver for MinGW targets.
+#
+# GNU binutils has no usable AArch64 PE/COFF support, so targets such as
+# ucrtarm64 (aarch64-w64-mingw32) are driven by clang, lld and the llvm-*
+# tools instead.  This script is installed once and symlinked as the usual
+# <triplet>-<tool> names, which is what every build system, and the
+# %{<target>_*} rpm macros in mingw-filesystem, expect to find.
+#
+# The shape follows llvm-mingw: the target and the tool are both derived from
+# the name the script was invoked as.
+#
+# Copyright (C) 2026 Fedora MinGW SIG
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+
+prog=`basename "$0"`
+
+case "$prog" in
+    *-*) ;;
+    *)
+	echo "$prog: must be invoked as <triplet>-<tool>" >&2
+	exit 1
+	;;
+esac
+
+tool=${prog##*-}
+triplet=${prog%-*}
+
+# All MinGW targets share the same sysroot layout, owned by <target>-filesystem.
+sysroot=/usr/$triplet/sys-root/mingw
+
+# llvm-dlltool needs the machine spelled out and ld.lld needs an emulation;
+# everything else takes the triple.
+case "$triplet" in
+    i686-w64-mingw32)		machine=i386;		emulation=i386pe ;;
+    x86_64-w64-mingw32|x86_64-w64-mingw32ucrt)
+				machine=i386:x86-64;	emulation=i386pep ;;
+    aarch64-w64-mingw32)	machine=arm64;		emulation=arm64pe ;;
+    *)
+	echo "$prog: unknown target $triplet" >&2
+	exit 1
+	;;
+esac
+
+flags="--target=$triplet --sysroot=$sysroot -fuse-ld=lld"
+
+# Select the LLVM runtime stack, unconditionally.  These precede "$@" and
+# clang takes the last occurrence, so callers override them.  See README.md.
+c_runtime_flags="-rtlib=compiler-rt -unwindlib=libunwind"
+cxx_runtime_flags="$c_runtime_flags -stdlib=libc++"
+
+case "$tool" in
+    clang|cc|gcc)
+	exec clang $flags $c_runtime_flags "$@"
+	;;
+    clang++|c++|g++)
+	exec clang++ $flags $cxx_runtime_flags "$@"
+	;;
+    cpp)
+	# Must exist: build systems preprocess with $(CPP), and %<target>_env
+	# only exports CPP if there is a <triplet>-cpp to find.  Without it
+	# mingw-w64 preprocesses its .def.in export lists with whichever
+	# preprocessor is left over, silently producing an export table for
+	# the wrong architecture.
+	exec clang $flags -E "$@"
+	;;
+    as)
+	exec clang $flags -c -x assembler "$@"
+	;;
+    ld)
+	# The emulation picks lld's MinGW driver; bare ld.lld is the ELF one.
+	# It is what clang passes when it drives the link, and without it
+	# libtool's "does $LD support shared libraries" probe, which greps
+	# $LD --help for auto-import, sees ELF help and answers no.
+	exec ld.lld -m $emulation "$@"
+	;;
+    dlltool)
+	exec llvm-dlltool -m $machine "$@"
+	;;
+    windres)
+	exec llvm-windres --target=$triplet "$@"
+	;;
+    addr2line|ar|cxxfilt|nm|objcopy|objdump|ranlib|readelf|size|strings|strip)
+	exec llvm-$tool "$@"
+	;;
+    *)
+	echo "$prog: unknown tool $tool" >&2
+	exit 1
+	;;
+esac

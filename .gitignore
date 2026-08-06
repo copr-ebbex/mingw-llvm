@@ -1,0 +1,3 @@
+*.rpm
+*.src.rpm
+results_*/
