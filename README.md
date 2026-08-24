@@ -27,8 +27,8 @@ Packages
 | `mingw-llvm-common` | the shared driver | - |
 | `ucrtarm64-llvm-tools` | ar, nm, objdump, dlltool, windres, ld, ... | llvm, lld |
 | `ucrtarm64-clang` | clang, clang++, cpp, as, cc, c++, gcc, g++ | ucrtarm64-llvm-tools, clang, ucrtarm64-headers, ucrtarm64-crt, ucrtarm64-compiler-rt |
-| `mingw32-clang` | clang, clang++, cpp, cc | clang, lld, mingw32-headers, mingw32-crt, mingw32-compiler-rt, mingw32-libunwind |
-| `mingw64-clang` | clang, clang++, cpp, cc | clang, lld, mingw64-headers, mingw64-crt, mingw64-compiler-rt, mingw64-libunwind |
+| `mingw32-clang` | clang, clang++, cc | clang, lld, mingw32-headers, mingw32-crt, mingw32-compiler-rt, mingw32-libunwind |
+| `mingw64-clang` | clang, clang++, cc | clang, lld, mingw64-headers, mingw64-crt, mingw64-compiler-rt, mingw64-libunwind |
 
 The split mirrors mingw-binutils-generic vs mingw-gcc, and it is not
 cosmetic: `ucrtarm64-filesystem` needs the binary utilities in every buildroot
@@ -51,10 +51,12 @@ Supplement targets
 The win32 and win64 targets have a full GNU toolchain, and mingw-gcc and
 mingw-binutils own the `<triplet>-*` names in `/usr/bin`.  For those targets
 this package ships only the driver names the GNU packages leave unowned -
-`cc`, `clang`, `clang++` and `cpp` (`%clang_targets` in the spec) - so both
-toolchains install side by side and the GNU one stays the default.  The
-binary utilities stay with mingw-binutils, which also supplies the tools LLVM
-has no counterpart for (`windmc`).
+`cc`, `clang` and `clang++` (`%clang_targets` in the spec) - so both
+toolchains install side by side and the GNU one stays the default.  No
+`cpp`: mingw-cpp owns `<triplet>-cpp`, and the rpm macros' clang column
+preprocesses with `<triplet>-clang -E` instead.  The binary utilities stay
+with mingw-binutils, which also supplies the tools LLVM has no counterpart
+for (`windmc`).
 
 Like the ARM64 drivers, the supplement drivers select the LLVM runtime stack
 (compiler-rt and libunwind); building C++ additionally needs libc++, which is

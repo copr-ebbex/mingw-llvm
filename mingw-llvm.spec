@@ -16,9 +16,10 @@
 # Tools which are compiler drivers.
 %global tools_compiler as c++ cc clang clang++ cpp g++ gcc
 
-# The compiler drivers for %%clang_targets: only the names mingw-gcc and
-# mingw-binutils leave unowned.
-%global tools_clang cc clang clang++ cpp
+# The compiler drivers for %%clang_targets: only the names the GNU toolchain
+# packages leave unowned.  No cpp: mingw-cpp owns <triplet>-cpp, and the
+# macros' clang column preprocesses with "<triplet>-clang -E" anyway.
+%global tools_clang cc clang clang++
 
 # The runtimes the drivers select are built with this toolchain, so they
 # cannot exist the first time it is built.  "--with bootstrap" drops the
@@ -28,7 +29,7 @@
 
 Name:           mingw-llvm
 Version:        1
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        LLVM based cross toolchain drivers for MinGW targets
 
 License:        GPL-2.0-or-later
@@ -123,8 +124,8 @@ Requires:       mingw32-libunwind
 
 %description -n mingw32-clang
 This package contains clang drivers for the i686-w64-mingw32 target,
-supplementing the GCC toolchain: only the driver names mingw32-gcc and
-mingw32-binutils do not own (cc, clang, clang++, cpp) are provided.
+supplementing the GCC toolchain: only the driver names the GNU toolchain
+packages do not own (cc, clang, clang++) are provided.
 
 The drivers select the LLVM runtime stack (compiler-rt, libunwind).  C++
 additionally needs libc++, which is not yet packaged for this target.
@@ -144,8 +145,8 @@ Requires:       mingw64-libunwind
 
 %description -n mingw64-clang
 This package contains clang drivers for the x86_64-w64-mingw32 target,
-supplementing the GCC toolchain: only the driver names mingw64-gcc and
-mingw64-binutils do not own (cc, clang, clang++, cpp) are provided.
+supplementing the GCC toolchain: only the driver names the GNU toolchain
+packages do not own (cc, clang, clang++) are provided.
 
 The drivers select the LLVM runtime stack (compiler-rt, libunwind).  C++
 additionally needs libc++, which is not yet packaged for this target.
@@ -398,6 +399,12 @@ exit $rc
 
 
 %changelog
+* Mon Aug 24 2026 Erik Berg <fedora@slipsprogrammor.no> - 1-3
+- Drop the supplement targets' cpp driver: mingw-cpp owns <triplet>-cpp,
+  so installing the clang supplements next to the full GCC toolchain hit
+  a file conflict.  Preprocessing takes "<triplet>-clang -E", which the
+  macros' clang column already uses
+
 * Mon Aug 24 2026 Erik Berg <fedora@slipsprogrammor.no> - 1-2
 - Add mingw32-clang and mingw64-clang: clang drivers supplementing the GNU
   toolchain for the win32 and win64 targets, shipping only the driver names
