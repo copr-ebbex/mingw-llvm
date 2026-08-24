@@ -27,6 +27,8 @@ Packages
 | `mingw-llvm-common` | the shared driver | - |
 | `ucrtarm64-llvm-tools` | ar, nm, objdump, dlltool, windres, ld, ... | llvm, lld |
 | `ucrtarm64-clang` | clang, clang++, cpp, as, cc, c++, gcc, g++ | ucrtarm64-llvm-tools, clang, ucrtarm64-headers, ucrtarm64-crt, ucrtarm64-compiler-rt |
+| `mingw32-clang` | clang, clang++, cpp, cc | clang, lld, mingw32-headers, mingw32-crt, mingw32-compiler-rt, mingw32-libunwind |
+| `mingw64-clang` | clang, clang++, cpp, cc | clang, lld, mingw64-headers, mingw64-crt, mingw64-compiler-rt, mingw64-libunwind |
 
 The split mirrors mingw-binutils-generic vs mingw-gcc, and it is not
 cosmetic: `ucrtarm64-filesystem` needs the binary utilities in every buildroot
@@ -42,6 +44,21 @@ invokes.
 
 Adding another LLVM driven target is a matter of adding its triplet to
 `%llvm_targets` in the spec and adding the matching subpackages.
+
+Supplement targets
+------------------
+
+The win32 and win64 targets have a full GNU toolchain, and mingw-gcc and
+mingw-binutils own the `<triplet>-*` names in `/usr/bin`.  For those targets
+this package ships only the driver names the GNU packages leave unowned -
+`cc`, `clang`, `clang++` and `cpp` (`%clang_targets` in the spec) - so both
+toolchains install side by side and the GNU one stays the default.  The
+binary utilities stay with mingw-binutils, which also supplies the tools LLVM
+has no counterpart for (`windmc`).
+
+Like the ARM64 drivers, the supplement drivers select the LLVM runtime stack
+(compiler-rt and libunwind); building C++ additionally needs libc++, which is
+not yet packaged for these targets.
 
 Tool mapping
 ------------
@@ -117,9 +134,10 @@ compiler-rt, libunwind and libc++.
 The runtimes are built *with* this toolchain, so they cannot exist the first
 time it is built.  A build with `--with bootstrap` drops the
 `ucrtarm64-compiler-rt` requirement and the `ucrtarm64-libcxx`
-recommendation from `ucrtarm64-clang`; the drivers themselves are identical.
-`%dist` appends `~bootstrap` to such a build, so the regular build supersedes
-it at the same release number.
+recommendation from `ucrtarm64-clang`, and the `compiler-rt`/`libunwind`
+requirements from the supplement packages; the drivers themselves are
+identical.  `%dist` appends `~bootstrap` to such a build, so the regular
+build supersedes it at the same release number.
 
 The stack is brought up in this order:
 

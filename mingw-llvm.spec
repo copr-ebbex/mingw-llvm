@@ -2,6 +2,11 @@
 # for each of them.  Adding a target is a matter of adding it here.
 %global llvm_targets aarch64-w64-mingw32
 
+# Targets where GCC and binutils exist and own the <triplet>-* names in
+# %%{_bindir}.  These get only the driver names neither of them ships: a
+# clang toolchain supplementing the GNU one, not replacing it.
+%global clang_targets i686-w64-mingw32 x86_64-w64-mingw32
+
 # Tools which take the place of binutils, packaged apart from the compiler.
 # No "rc": %%<target>_env would export RC=llvm-rc, which speaks MSVC options,
 # not the -i/-o that libtool and autotools expect.  No "as": it is a clang
@@ -11,6 +16,10 @@
 # Tools which are compiler drivers.
 %global tools_compiler as c++ cc clang clang++ cpp g++ gcc
 
+# The compiler drivers for %%clang_targets: only the names mingw-gcc and
+# mingw-binutils leave unowned.
+%global tools_clang cc clang clang++ cpp
+
 # The runtimes the drivers select are built with this toolchain, so they
 # cannot exist the first time it is built.  "--with bootstrap" drops the
 # runtime Requires; %%dist appends ~bootstrap, which sorts below the full
@@ -19,7 +28,7 @@
 
 Name:           mingw-llvm
 Version:        1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        LLVM based cross toolchain drivers for MinGW targets
 
 License:        GPL-2.0-or-later
@@ -100,6 +109,48 @@ runtime stack (compiler-rt, libunwind, libc++), as there is no libgcc or
 libstdc++ for this target.
 
 
+%package -n mingw32-clang
+Summary:        LLVM based cross compiler for the win32 target
+Requires:       %{name}-common = %{version}-%{release}
+Requires:       clang >= 22
+Requires:       lld >= 22
+Requires:       mingw32-crt
+Requires:       mingw32-headers
+%if %{without bootstrap}
+Requires:       mingw32-compiler-rt
+Requires:       mingw32-libunwind
+%endif
+
+%description -n mingw32-clang
+This package contains clang drivers for the i686-w64-mingw32 target,
+supplementing the GCC toolchain: only the driver names mingw32-gcc and
+mingw32-binutils do not own (cc, clang, clang++, cpp) are provided.
+
+The drivers select the LLVM runtime stack (compiler-rt, libunwind).  C++
+additionally needs libc++, which is not yet packaged for this target.
+
+
+%package -n mingw64-clang
+Summary:        LLVM based cross compiler for the win64 target
+Requires:       %{name}-common = %{version}-%{release}
+Requires:       clang >= 22
+Requires:       lld >= 22
+Requires:       mingw64-crt
+Requires:       mingw64-headers
+%if %{without bootstrap}
+Requires:       mingw64-compiler-rt
+Requires:       mingw64-libunwind
+%endif
+
+%description -n mingw64-clang
+This package contains clang drivers for the x86_64-w64-mingw32 target,
+supplementing the GCC toolchain: only the driver names mingw64-gcc and
+mingw64-binutils do not own (cc, clang, clang++, cpp) are provided.
+
+The drivers select the LLVM runtime stack (compiler-rt, libunwind).  C++
+additionally needs libc++, which is not yet packaged for this target.
+
+
 %prep
 %setup -q -c -T
 cp %{SOURCE0} COPYING
@@ -127,6 +178,12 @@ for triplet in %{llvm_targets}; do
     echo "%{_bindir}/$triplet-$tool" >> $topdir/filelist-$triplet-compiler
   done
 done
+for triplet in %{clang_targets}; do
+  for tool in %{tools_clang}; do
+    ln -s %{_libexecdir}/mingw-llvm-wrapper $triplet-$tool
+    echo "%{_bindir}/$triplet-$tool" >> $topdir/filelist-$triplet-compiler
+  done
+done
 popd
 
 
@@ -139,6 +196,11 @@ mkdir -p check-bin
 install -m 755 %{SOURCE1} check-bin/mingw-llvm-wrapper
 for triplet in %{llvm_targets}; do
   for tool in %{tools_binutils} %{tools_compiler}; do
+    ln -s mingw-llvm-wrapper check-bin/$triplet-$tool
+  done
+done
+for triplet in %{clang_targets}; do
+  for tool in %{tools_clang}; do
     ln -s mingw-llvm-wrapper check-bin/$triplet-$tool
   done
 done
@@ -163,6 +225,16 @@ for triplet in %{llvm_targets}; do
     fi
   done
   test -x check-bin/$triplet-dlltool || { echo "check: FAIL  no $triplet-dlltool"; rc=1; }
+done
+for triplet in %{clang_targets}; do
+  for tool in %{tools_clang}; do
+    if out=$($triplet-$tool --version 2>&1); then
+      echo "check: ok    $triplet-$tool --version"
+    else
+      echo "check: FAIL  $triplet-$tool --version: $out"
+      rc=1
+    fi
+  done
 done
 
 # 1b. dlltool, for real: an import library is what it exists to produce, and
@@ -202,6 +274,22 @@ case "$out" in
     rc=1 ;;
 esac
 
+# 3b. Same for the supplement targets, against the normalised triples clang
+#     reports.
+for pair in "i686-w64-mingw32 i686-w64-windows-gnu" \
+            "x86_64-w64-mingw32 x86_64-w64-windows-gnu"; do
+  triplet=$(echo "$pair" | cut -d' ' -f1)
+  normalized=$(echo "$pair" | cut -d' ' -f2)
+  out=$($triplet-clang -### -c -x c /dev/null 2>&1)
+  case "$out" in
+    *"Target: $normalized"*)
+      echo "check: ok    $triplet-clang -### targets $normalized" ;;
+    *)
+      echo "check: FAIL  $triplet-clang -### does not target $normalized: $out"
+      rc=1 ;;
+  esac
+done
+
 # 4. The runtime flags are emitted, and emitted before the caller's arguments
 #    so that the caller can override them by passing the opposite flag.
 trace=$(sh -x check-bin/aarch64-w64-mingw32-clang --version 2>&1 | grep 'exec clang ')
@@ -221,6 +309,19 @@ case "$trace" in
     echo "check: FAIL  clang++ driver flags wrong: $trace"
     rc=1 ;;
 esac
+
+# 4b. The supplement targets select the same LLVM runtime stack: they exist
+#     to build against compiler-rt/libunwind, not against libgcc.
+for triplet in %{clang_targets}; do
+  trace=$(sh -x check-bin/$triplet-clang --version 2>&1 | grep 'exec clang ')
+  case "$trace" in
+    *-rtlib=compiler-rt*-unwindlib=libunwind*--version*)
+      echo "check: ok    $triplet-clang driver flags precede the caller's" ;;
+    *)
+      echo "check: FAIL  $triplet-clang driver flags wrong: $trace"
+      rc=1 ;;
+  esac
+done
 
 # 5. No <triplet>-rc: it would point RC at llvm-rc, whose MSVC style options
 #    libtool's --tag=RC does not speak.
@@ -258,6 +359,27 @@ if [ "$bad" = 0 ]; then
   echo "check: ok    the tools filelist contains no compiler drivers"
 fi
 
+# 8. The supplement targets may only ship names mingw-gcc and mingw-binutils
+#    leave unowned; anything else is a file conflict with the GNU toolchain
+#    packages.  Test the generated filelists against the allowlist.
+for triplet in %{clang_targets}; do
+  bad=0
+  while read -r path; do
+    tool=$(basename "$path" | sed "s/^$triplet-//")
+    case " %{tools_clang} " in
+      *" $tool "*) ;;
+      *)
+        echo "check: FAIL  $triplet-$tool conflicts with the GNU toolchain"
+        bad=1
+        rc=1
+        ;;
+    esac
+  done < filelist-$triplet-compiler
+  if [ "$bad" = 0 ]; then
+    echo "check: ok    $triplet ships only unowned driver names"
+  fi
+done
+
 exit $rc
 
 
@@ -270,8 +392,19 @@ exit $rc
 
 %files -n ucrtarm64-clang -f filelist-aarch64-w64-mingw32-compiler
 
+%files -n mingw32-clang -f filelist-i686-w64-mingw32-compiler
+
+%files -n mingw64-clang -f filelist-x86_64-w64-mingw32-compiler
+
 
 %changelog
+* Mon Aug 24 2026 Erik Berg <fedora@slipsprogrammor.no> - 1-2
+- Add mingw32-clang and mingw64-clang: clang drivers supplementing the GNU
+  toolchain for the win32 and win64 targets, shipping only the driver names
+  mingw-gcc and mingw-binutils leave unowned (cc, clang, clang++, cpp)
+- The supplement drivers select compiler-rt and libunwind, like ucrtarm64;
+  the bootstrap pass drops those Requires until the runtimes exist
+
 * Thu Aug 06 2026 Erik Berg <fedora@slipsprogrammor.no> - 1-1
 - Initial package: aarch64-w64-mingw32 toolchain drivers on clang, lld and
   the llvm-* tools, split into ucrtarm64-llvm-tools and ucrtarm64-clang
